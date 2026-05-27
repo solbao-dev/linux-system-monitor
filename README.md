@@ -142,3 +142,86 @@ sudo ufw status verbose
 ![방화벽 설정 완료](./docs/img/ufw-check.png)
 - 방화벽(`ufw`) 상태를 확인하여 보안 포트 20022(SSH)와 에이전트 전용 포트 15034가 정상적으로 허용(ALLOW)되었는지 검증완료 
 
+---
+## 👥 4. 사용자 계정 및 직무 그룹 관리 (RBAC 구조)
+
+### 1.개별 사용자 계정 생성 (`useradd`)
+
+리눅스 환경에서 다수의 팀원이 공용 계정(root, ubuntu)을 공유하면 
+
+1)작업 이력 역추적이 불가능하고 2)한 명의 실수가 시스템 전체에 치명적인 영향을 줄 수 있습니다. 
+
+따라서 최소 권한 원칙(Principle of Least Privilege)에 따라 직무 역할에 맞는 개별 계정을 생성합니다.
+
+![역할 기반 접근 제어](./docs/img/role-based-access-control.png)
+- RBAC (Role-Based Access Control, 역할 기반 접근 제어).   
+
+시스템 권한을 사용자 개인에게 직접 부여하지 않고, 직무에 따른 '역할(Role/Group)'에 권한을 할당한 뒤 사용자를 해당 역할에 매핑하는 보안 관리 모델입니다. 이를 통해 대규모 인프라에서도 권한 관리를 효율적이고 안전하게 자동화할 수 있습니다.
+
+```bash
+# 1. 공통 및 코어 보안용 직무 그룹 생성
+sudo groupadd agent-common
+sudo groupadd agent-core
+
+# 2. 직무별 개별 사용자 계정 생성 및 권한 분리
+sudo useradd -m -G agent-common,agent-core -s /bin/bash agent-admin
+sudo useradd -m -G agent-common,agent-core -s /bin/bash agent-dev
+sudo useradd -m -G agent-common -s /bin/bash agent-test
+```
+💡 핵심 옵션 및 실무적 의미 파악하기
+
+
+`sudo`: 사용자 생성 및 그룹 할당은 시스템 핵심 환경을 변경하는 작업이므로 최고 관리자(Root) 권한을 강제합니다.
+
+`-m` (Make Home): 사용자가 로그인 후 독립적으로 작업할 수 있는 전용 홈 디렉토리(/home/계정명)를 자동으로 생성합니다. 생략 시 홈 디렉토리가 부재하여 정상적인 쉘 세션 유지가 불가능합니다.
+
+`-G` (Secondary Group): 사용자를 보조 그룹에 할당하여 RBAC(역할 기반 접근 제어)를 구현합니다.
+
+`agent-admin`, `agent-dev`: 핵심 자원에 접근 가능한 agent-core와 공통 그룹인 agent-common 모두 할당
+
+`agent-test`: 권한 제한을 위해 agent-common 그룹만 할당
+
+`-s /bin/bash` (Default Shell): 로그인 시 사용할 기본 쉘을 지정합니다. 리눅스 환경에서 가장 범용적이고 편의 기능(자동완성, 히스토리 관리 등)이 풍부한 Bash 쉘을 기본값으로 명시합니다.
+
+### 2. 초기 패스워드 일괄 주입 (chpasswd)
+
+```bash
+# 사용자별 초기 패스워드 일괄 주입
+echo "agent-admin:1234" | sudo chpasswd
+echo "agent-dev:1234" | sudo chpasswd
+echo "agent-test:1234" | sudo chpasswd
+```
+인증 요구 규격 준수: `리눅스 보안 아키텍처`상 패스워드가 설정되지 않은 계정은 외부(SSH 등) 로그인이 원천 차단됩니다. 따라서 `최초 접근 통로를 열어주기 위해 임시 패스워드 주입이 필수적`입니다.
+
+프로비저닝 자동화: 일반적인 passwd 명령어는 대화형(Interactive)으로 값을 입력받기 때문에 스크립트를 통한 인프라 자동화가 어렵습니다. 반면 `chpasswd`는 파이프라인(|)을 통해 사용자ID:패스워드 형태로 값을 전달받아 `일괄 처리(Batch Process)`할 수 있어 시스템 배포 프로세스를 효율화합니다.
+
+### 3. 정상 작동 검증 (Validation)
+
+id [사용자명] 명령어를 통해 각 사용자의 UID(User ID), GID(Primary Group ID), 그리고 -G 옵션으로 추가한 서브 그룹들이 설계대로 완벽하게 매핑되었는지 최종 교차 검증하였습니다.
+
+```bash
+id agent-admin && id agent-dev && id agent-test
+```
+
+![Linux RBAC 계정 및 그룹 할당 최종 검증 결과](./docs/img/verification_RBAC.png)
+
+① agent-admin 계정 검증
+
+```bash
+uid=1001(agent-admin) gid=1001(agent-admin) groups=1001(agent-admin),27(sudo)
+```
+`agent-admin` 계정은 groups에 27(sudo)가 포함되어 있습니다. 리눅스에서 sudo 그룹에 속해있다는 것은 시스템 전체를 제어할 수 있는 최고 관리자 권한을 가졌음을 의미하므로 설계대로 작동하고 있음을 확인하였습니다.
+
+② agent-dev 계정 검증
+
+```bash
+uid=1002(agent-dev) gid=1004(agent-dev) groups=1004(agent-dev),1002(agent-common),1003(agent-core)
+```
+`agent-dev`계정은 일반 공통 업무용 그룹인 1002(agent-common)와 핵심 코어 자원에 접근할 수 있는 1003(agent-core) 그룹에 모두 안전하게 소속되어 있습니다. 개발 생산성과 시스템 접근성을 모두 갖춘 개발자 역할(Role)이 올바르게 매핑되었습니다.
+
+③ agent-test 계정 검증
+```bash
+uid=1003(agent-test) gid=1005(agent-test) groups=1005(agent-test),1002(agent-common)
+```
+`agent-test`계정은 공통 그룹인 1002(agent-common)에는 소속되어 있지만, 보안이 중요한 agent-core 그룹 정보는 로그에서 찾아볼 수 없습니다. 즉, 테스터로서 필요한 권한만 갖고 핵심 인프라에는 접근할 수 없도록 최소 권한 원칙(RBAC)이 완벽하게 구현되었음을 기술적으로 증명합니다.
+
