@@ -326,3 +326,57 @@ getfacl ~/agent-app/api_keys
 - **핵심 검증 포인트 2 (상세 그룹 분리):** 공통 협업 영역은 `agent-common` 그룹, 핵심 보안 및 로그 영역은 `agent-core` 소유로 분리 지정되었습니다.
 
 - **핵심 검증 포인트 3 (미래 권한 자동 상속):** `getfacl` 조회 결과, 하단에 `default:group:agent-common:rwx` 장부가 명시되어 있어 향후 유입되거나 생성될 하위 파일에도 수동 권한 부여 없이 보안 정책이 자동으로 누락 없이 상속됨을 증명합니다.
+---
+## 🌐 7. 환경 변수 및 인증 키 세팅 & 에이전트 구동 확인
+하드코딩(코드 내에 직접 값을 입력하는 것) 방식은 경로 변경 시 유지보수가 어렵고, 민감한 인증 키가 외부(GitHub 등)에 유출될 위험이 큽니다.
+
+이를 방지하기 위해 프로그램의 주요 경로와 포트 정보를 `시스템 환경 변수`로 등록하여 `중앙 집중식`으로 관리합니다. 동시에, 핵심 인증 키는 별도의 보안 파일로 분리하고 소유자 외 외부인의 접근을 철저히 차단(chmod 640)(rw-/r--/---)하여 시스템의 유연성과 보안성을 동시에 확보합니다.
+
+### ⚙️ 시스템 환경 변수 구성 (~/.bashrc)
+
+에이전트 데몬이 구동 시 참조하는 핵심 변수들을 최고 관리자 계정 환경 설정 파일에 등록합니다.
+```bash
+# ~/.bashrc 파일 맨 하단에 아래 변수 세트 반영
+export AGENT_HOME=/home/agent-admin/agent-app
+export AGENT_PORT=15034
+export AGENT_UPLOAD_DIR=$AGENT_HOME/upload_files
+export AGENT_KEY_PATH=$AGENT_HOME/api_keys⚙️
+export AGENT_LOG_DIR=/var/log/agent-app
+```
+` 최초 배포된 가이드에는 KEY_PATH에 파일명까지 기재되어 프로그램 미스매치가 발생하였으나, 디버깅을 통해 디렉토리 경로까지만 지정하도록 수동 정정 조치 완료함`
+
+### ⚙️ 반영 및 정상 등록 검증
+
+```bash
+source ~/.bashrc && env | grep AGENT
+```
+
+### 🔑 API Secret Key 보안 파일 생성 및 이중 잠금
+
+에이전트 인증에 필수적인 시크릿 키 파일을 프로그램 내부 파싱 규격에 맞추어 명명하고, agent-core 그룹만 접근 가능한 보안 디렉토리 내부에 배치합니다.
+
+```bash
+# 1. 보안 디렉토리 이동 및 에이전트 인식용 키 파일 생성
+cd $AGENT_HOME/api_keys
+echo "agent_api_key_test" > secret.key
+
+# 2. 소유권 정밀 매칭 (owner: agent-admin, group: agent-core)
+sudo chown agent-admin:agent-core secret.key
+
+# 3. 기본 접근 권한 최소화 (소유자 읽기/쓰기, 그룹 읽기 전용, 외부인 출입 통제)
+chmod 640 secret.key
+
+# 4. 확장 ACL 자물쇠를 통한 핵심 코어 그룹 권한 부여
+sudo setfacl -m g:agent-core:r secret.key
+```
+### 🔍 정상 작동 검증 및 에이전트 부팅 성공
+
+모든 환경 변수와 보안 키 튜닝이 완료된 후, 바이너리를 단독 구동하여 5대 부팅 시퀀스([OK])를 완벽하게 통과시켰습니다.
+
+```bash
+# 에이전트 실행 엔진 수동 구동 테스트
+cd $AGENT_HOME/bin
+./agent-app
+```
+### 📸 에이전트 부팅 시퀀스 Pass 인증샷
+![에이전트 구동 확인](./docs/img/agent-boot-success.png)
