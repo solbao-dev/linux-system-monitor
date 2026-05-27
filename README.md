@@ -70,8 +70,7 @@ open ~/Applications/UTM.app
 
 > 💡 **환경 교정 기록:** > 가상 머신 최초 빌드 시 시스템 시간대가 `Etc/UTC`로 설정되어 있는 것을 확인하여, `sudo timedatectl set-timezone Asia/Seoul` 명령어를 통해 한국 표준시(KST)로 수동 교정 완료함.
 
-### 스크린샷
-**📷 우분투 세부 환경 검증 스크린샷**
+### 📷 우분투 세부 환경 검증 스크린샷
 ![우분투 세부 환경 검증 화면](./docs/img/ubuntu-system-check.png)
 ---
 ## 🔒2. SSH 보안 설정 (포트 격리 & 루트 접속 차단)  
@@ -145,6 +144,7 @@ sudo ufw status verbose
 ---
 ## 👥 4. 사용자 계정 및 직무 그룹 관리 (RBAC 구조)
 
+
 ### 1.개별 사용자 계정 생성 (`useradd`)
 
 리눅스 환경에서 다수의 팀원이 공용 계정(root, ubuntu)을 공유하면 
@@ -183,6 +183,7 @@ sudo useradd -m -G agent-common -s /bin/bash agent-test
 
 `-s /bin/bash` (Default Shell): 로그인 시 사용할 기본 쉘을 지정합니다. 리눅스 환경에서 가장 범용적이고 편의 기능(자동완성, 히스토리 관리 등)이 풍부한 Bash 쉘을 기본값으로 명시합니다.
 
+---
 ### 2. 초기 패스워드 일괄 주입 (chpasswd)
 
 ```bash
@@ -195,6 +196,7 @@ echo "agent-test:1234" | sudo chpasswd
 
 프로비저닝 자동화: 일반적인 passwd 명령어는 대화형(Interactive)으로 값을 입력받기 때문에 스크립트를 통한 인프라 자동화가 어렵습니다. 반면 `chpasswd`는 파이프라인(|)을 통해 사용자ID:패스워드 형태로 값을 전달받아 `일괄 처리(Batch Process)`할 수 있어 시스템 배포 프로세스를 효율화합니다.
 
+---
 ### 3. 정상 작동 검증 (Validation)
 
 id [사용자명] 명령어를 통해 각 사용자의 UID(User ID), GID(Primary Group ID), 그리고 -G 옵션으로 추가한 서브 그룹들이 설계대로 완벽하게 매핑되었는지 최종 교차 검증하였습니다.
@@ -225,3 +227,102 @@ uid=1003(agent-test) gid=1005(agent-test) groups=1005(agent-test),1002(agent-com
 ```
 `agent-test`계정은 공통 그룹인 1002(agent-common)에는 소속되어 있지만, 보안이 중요한 agent-core 그룹 정보는 로그에서 찾아볼 수 없습니다. 즉, 테스터로서 필요한 권한만 갖고 핵심 인프라에는 접근할 수 없도록 최소 권한 원칙(RBAC)이 완벽하게 구현되었음을 기술적으로 증명합니다.
 
+
+---
+## 📦 5. 에이전트 앱 인프라 반입 (맥북 ➡️ 우분투 전송)
+외부 네트워크망이나 로컬(맥북 바탕화면)에 보관된 에이전트 프로그램 소스를 보안 설정이 완료된 가상 서버 내부로 안전하게 이송하는 단계입니다. 앞선 단계에서 SSH 포트를 20022번으로 안전하게 격리했으므로, 원격 복사 도구인 `scp` 유틸리티를 활용할 때도 해당 20022 포트 보안벽을 통과하도록 커스텀 전송을 수행합니다.
+
+- 🛠️맥북 바탕화면의 agent-app 폴더를 20022 보안 포트를 통해 우분투 서버로 안전하게 전송 
+
+-  맥 로컬 터미널에서 수행
+```bash
+cd ~/Desktop
+scp -P 20022 -r ./agent-app agent-admin@192.168.64.2:~/
+```
+
+
+- 🔍가상 서버 내 반입 확인 
+
+- 우분투 터미널에서 수행
+```bash
+cd ~/agent-app
+ls -l
+```
+
+
+![에이전트 반입 성공](./docs/img/agent-import-success.png)
+출력 결과: agent-app-linux-arm64, agent-app-linux-x86 원본 확인 완료
+
+- `agent-admin` 소유의 디렉토리 내부로 아키텍처별 실행 파일 원본이 손상 없이 온전하게 반입되었음을 확인하였으며, 이 중 가상 서버 환경인 x86_64에 매칭되는 실행 엔진을 최종 선택하여 배치할 준비를 완료했습니다.
+
+---
+## 📂 6. 디렉토리 위계 설계 및 확장 ACL 권한 관리
+리눅스의 기본 권한 설정(chmod)은 소유자/그룹/기타 사용자라는 딱 3가지 단계로만 권한을 쪼갤 수 있어서 복잡한 협업 환경을 커버하기 어렵습니다. 
+
+예를 들어, upload_files 폴더는 개발자와 테스터가 동시에 드나들어야 하지만, 민감한 인증키가 들어있는 api_keys는 테스터가 절대 열어볼 수 없어야 합니다. 이를 위해 리눅스의 확장 권한 기능인 `ACL(Access Control List)`을 사용해 정밀한 파일 접근 통제벽을 세웁니다.
+
+📁 디렉토리 타겟 설계 구조
+```bash
+$AGENT_HOME (/home/agent-admin/agent-app)
+├── upload_files  --> [공통 협업 영역] agent-common 그룹 전체 rwx 가능
+├── api_keys      --> [핵심 보안 영역] agent-core 그룹만 접근 가능 (Secret Key 보관)
+└── bin           --> [바이너리 영역] 인프라 환경(ARM64)에 맞춘 실전 실행 엔진 배치 공간
+
+/var/log/agent-app --> [시스템 로그 저장소] 에이전트 데몬 및 모니터링 로그 누적 영역
+```
+🛠️ 작업 명령어
+
+```bash
+# 1. 아키텍처(x86_64)에 맞는 실행 파일 매칭 및 하위 디렉토리 생성
+
+cd ~/agent-app
+mkdir -p upload_files api_keys bin
+sudo mkdir -p /var/log/agent-app
+
+cp agent-app-linux-x86 ./bin/agent-app
+chmod +x ./bin/agent-app
+rm agent-app-linux-arm64 agent-app-linux-x86 # 사용 완료된 원본 소스 제거
+
+# 2. 폴더 소유권을 최고 관리자인 agent-admin과 매칭 그룹으로 지정
+
+sudo chown -R agent-admin:agent-common ~/agent-app
+sudo chown -R agent-admin:agent-core ~/agent-app/api_keys ~/agent-app/bin
+sudo chown -R agent-admin:agent-core /var/log/agent-app
+
+# 3. 기본 접근 권한 튜닝 및 하위 파일들이 그룹 권한을 자동 상속받도록 특수 권한(SetGID) 부여
+
+sudo chmod 2770 ~/agent-app/upload_files
+sudo chmod 2770 ~/agent-app/api_keys
+sudo chmod 2750 ~/agent-app/bin
+sudo chmod 2770 /var/log/agent-app
+
+# 4. ACL(확장 접근 제어)을 활용하여 타겟 그룹별 맞춤형 rwx 권한 부여 및 자동 상속(-d) 설정
+
+sudo setfacl -m g:agent-common:rwx ~/agent-app/upload_files
+sudo setfacl -d -m g:agent-common:rwx ~/agent-app/upload_files
+
+sudo setfacl -m g:agent-core:rwx ~/agent-app/api_keys
+sudo setfacl -d -m g:agent-core:rwx ~/agent-app/api_keys
+
+sudo setfacl -m g:agent-core:rwx /var/log/agent-app
+sudo setfacl -d -m g:agent-core:rwx /var/log/agent-app
+```
+
+🔍 정상 작동 검증
+
+```bash
+# 디렉토리 권한 끝에 ACL 표식인 플러스(+) 기호가 붙었는지 확인
+ls -ld ~/agent-app/upload_files ~/agent-app/api_keys /var/log/agent-app
+
+# 상세 확장 ACL 권한 스펙 조회
+getfacl ~/agent-app/upload_files
+getfacl ~/agent-app/api_keys
+```
+![확장 ACL 권한 설정 완료 인증](./docs/img/agent-acl-success.png)
+![확장 ACL 권한 설정 완료 인증_api추가](./docs/img/gent-acl-success-api.png)
+
+- **핵심 검증 포인트 1 (ACL 활성화 기호 `+`):** `ls -ld` 명령어를 통해 각 보안 디렉토리(`upload_files`, `api_keys`, `/var/log/agent-app`)의 권한 식별자 맨 끝에 확장 접근 제어가 정상 가동 중임을 뜻하는 **플러스(`+`) 표식**을 검증 완료했습니다.
+
+- **핵심 검증 포인트 2 (상세 그룹 분리):** 공통 협업 영역은 `agent-common` 그룹, 핵심 보안 및 로그 영역은 `agent-core` 소유로 분리 지정되었습니다.
+
+- **핵심 검증 포인트 3 (미래 권한 자동 상속):** `getfacl` 조회 결과, 하단에 `default:group:agent-common:rwx` 장부가 명시되어 있어 향후 유입되거나 생성될 하위 파일에도 수동 권한 부여 없이 보안 정책이 자동으로 누락 없이 상속됨을 증명합니다.
