@@ -1,0 +1,6 @@
+{
+    "pasteImage.path": "./docs/img",
+    "markdown.copyFiles.destination": {
+        "/*": "docs/img"
+    }
+}
