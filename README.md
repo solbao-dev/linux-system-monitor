@@ -583,5 +583,44 @@ monitor.log.1.gz
 
 ![logrotate](./screenshots/logrotate.png)
 
----
 
+
+# 보너스 1 – report.sh
+
+monitor.log를 분석해 CPU/MEM/DISK의 평균/최대/최소와 샘플 수를 콘솔로 출력한다.
+(선택) 시작/종료 시간을 입력받아 해당 구간의 로그만 분석한다.  
+
+단순 로그 *저장* 에서 나아가 , 수만 줄의 텍스트 중에서 원하는 데이터만 골라 통계를 내는 `인프라 데이터 분석`도 가능 
+
+*리눅스의 강력한 텍스트 처리 도구인 awk와 문자열 필터링*  
+`awk`: *텍스트 파일을 한 줄씩 읽어서, 데이터 열(Column) 단위로 가공·분석하는 프로그래밍 언어 겸 명령어*  
+
+ex) "지난주에 서버가 제일 바빴던 시간이 언제지?" 
+
+작업명령어 확인 
+```bash
+cat /home/agent-admin/agent-app/bin/report.sh
+```
+출력결과  
+```bash
+시작 시간을 입력하세요 (포맷: YYYY-MM-DD HH:MM:SS, 생략시 전체분석): 
+종료 시간을 입력하세요 (포맷: YYYY-MM-DD HH:MM:SS, 생략시 전체분석): 
+
+====== STATISTICS REPORT ======
+[CPU]
+  Average : 22.4%
+  Maximum : 100.0% at 2026-05-29 00:42:01
+  Minimum : 1.1% at 2026-05-29 00:34:25
+[Memory]
+  Average : 12.4%
+  Maximum : 12.5% at 2026-05-29 00:34:30
+  Minimum : 12.3% at 2026-05-29 00:34:25
+[Samples]
+  Data Points: 6 samples
+
+[INFO] Log appended: /var/log/agent-app/monitor.log
+```
+스크린샷 
+![awk](./screenshots/awk.png)
+
+<br>
