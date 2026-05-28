@@ -71,7 +71,7 @@ open ~/Applications/UTM.app
 > 💡 **환경 교정 기록:** > 가상 머신 최초 빌드 시 시스템 시간대가 `Etc/UTC`로 설정되어 있는 것을 확인하여, `sudo timedatectl set-timezone Asia/Seoul` 명령어를 통해 한국 표준시(KST)로 수동 교정 완료함.
 
 ### 📷 우분투 세부 환경 검증 스크린샷
-![우분투 세부 환경 검증 화면](./docs/img/ubuntu-system-check.png)
+![우분투 세부 환경 검증 화면](.screenshot/ubuntu-system-check.png)
 ---
 ## 🔒2. SSH 보안 설정 (포트 격리 & 루트 접속 차단)  
 
@@ -97,7 +97,7 @@ sudo systemctl restart sshd
 ```bash
 sudo ss -tulnp | grep sshd
 ```
-![SHH 보안 설정 결과](./docs/img/ssh-result.png)
+![SHH 보안 설정 결과](./screenshots/ssh-result.png)
 
 
 - 서버가 20022포트에서 정상적으로 응답을 기다리고있는지 확인 됨(listen)
@@ -138,7 +138,7 @@ sudo ufw --force enable
 ```bash
 sudo ufw status verbose
 ```
-![방화벽 설정 완료](./docs/img/ufw-check.png)
+![방화벽 설정 완료](./screenshots//ufw-check.png)
 - 방화벽(`ufw`) 상태를 확인하여 보안 포트 20022(SSH)와 에이전트 전용 포트 15034가 정상적으로 허용(ALLOW)되었는지 검증완료 
 
 ---
@@ -153,7 +153,7 @@ sudo ufw status verbose
 
 따라서 최소 권한 원칙(Principle of Least Privilege)에 따라 직무 역할에 맞는 개별 계정을 생성합니다.
 
-![역할 기반 접근 제어](./docs/img/role-based-access-control.png)
+![역할 기반 접근 제어](./screenshots/role-based-access-control.png)
 - RBAC (Role-Based Access Control, 역할 기반 접근 제어).   
 
 시스템 권한을 사용자 개인에게 직접 부여하지 않고, 직무에 따른 '역할(Role/Group)'에 권한을 할당한 뒤 사용자를 해당 역할에 매핑하는 보안 관리 모델입니다. 이를 통해 대규모 인프라에서도 권한 관리를 효율적이고 안전하게 자동화할 수 있습니다.
@@ -205,7 +205,7 @@ id [사용자명] 명령어를 통해 각 사용자의 UID(User ID), GID(Primary
 id agent-admin && id agent-dev && id agent-test
 ```
 
-![Linux RBAC 계정 및 그룹 할당 최종 검증 결과](./docs/img/verification_RBAC.png)
+![Linux RBAC 계정 및 그룹 할당 최종 검증 결과](./screenshots/verification_RBAC.png)
 
 ① agent-admin 계정 검증
 
@@ -250,7 +250,7 @@ ls -l
 ```
 
 
-![에이전트 반입 성공](./docs/img/agent-import-success.png)
+![에이전트 반입 성공](./screenshots/agent-import-success.png)
 출력 결과: agent-app-linux-arm64, agent-app-linux-x86 원본 확인 완료
 
 - `agent-admin` 소유의 디렉토리 내부로 아키텍처별 실행 파일 원본이 손상 없이 온전하게 반입되었음을 확인하였으며, 이 중 가상 서버 환경인 x86_64에 매칭되는 실행 엔진을 최종 선택하여 배치할 준비를 완료했습니다.
@@ -318,8 +318,8 @@ ls -ld ~/agent-app/upload_files ~/agent-app/api_keys /var/log/agent-app
 getfacl ~/agent-app/upload_files
 getfacl ~/agent-app/api_keys
 ```
-![확장 ACL 권한 설정 완료 인증](./docs/img/agent-acl-success.png)
-![확장 ACL 권한 설정 완료 인증_api추가](./docs/img/gent-acl-success-api.png)
+![확장 ACL 권한 설정 완료 인증](./screenshots/agent-acl-success.png)
+![확장 ACL 권한 설정 완료 인증_api추가](./screenshots/gent-acl-success-api.png)
 
 - **핵심 검증 포인트 1 (ACL 활성화 기호 `+`):** `ls -ld` 명령어를 통해 각 보안 디렉토리(`upload_files`, `api_keys`, `/var/log/agent-app`)의 권한 식별자 맨 끝에 확장 접근 제어가 정상 가동 중임을 뜻하는 **플러스(`+`) 표식**을 검증 완료했습니다.
 
@@ -379,4 +379,24 @@ cd $AGENT_HOME/bin
 ./agent-app
 ```
 ### 📸 에이전트 부팅 시퀀스 Pass 인증샷
-![에이전트 구동 확인](./docs/img/agent-boot-success.png)
+![에이전트 구동 확인](./screenshots/agent-boot-success.png)
+---
+## ⚙️ 8. Agent App 백그라운드 구동 (데몬화)
+
+터미널에서 앱을 일반적인 방식으로 실행하면, 내가 맥 컴퓨터를 끄거나 SSH 접속 터미널을 닫는 순간 서버 프로그램도 같이 죽어버립니다. 이를 방지하기 위해 터미널 창을 닫아도 서버 내부에서 독립적으로 영원히 켜져 있도록 백그라운드 상주 프로세스(데몬) 형태로 실행되도록하였습니다.
+
+🛠️ 작업 명령어
+```bash
+# 표준 출력 및 에러 내역을 로그 파일로 저장하도록 돌려놓고, 백그라운드(&)로 구동
+$AGENT_HOME/bin/agent-app > $AGENT_LOG_DIR/agent_app.log 2>&1 &
+
+# 앱 가동 전용 포트(15034)가 정상 수신 대기 상태인지 최종 확인
+sudo ss -tuln | grep 15034
+```
+### 📸 에이전트 백그라운드 데몬화 구동 인증샷
+![에이전트 데몬화](./screenshots/agent-daemon.png)
+1. **백그라운드 상주 상태**: `&` 옵션 및 출력 리다이렉션(`>`)을 이용하여 터미널 종료 시에도 독립적으로 영원히 구동되도록 프로세스 데몬화 완료.
+
+2. **네트워크 포트 확인**: `ss -tuln` 검증 결과, 포트 `15034`가 정상적으로 `LISTEN` 상태를 유지하며 수신 대기 중임을 확인.
+
+3. **독립 로그 파일 검증**: `tail` 명령어 확인 결과, 화면 방해 없이 `/var/log/agent-app/agent_app.log` 내부에 실시간 서비스 로그가 안정적으로 적재되고 있음을 검증함.
